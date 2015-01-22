@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-
 # The MIT License (MIT)
 #
-# Copyright (c) 2013-2014 Rob Zimmerman
+# Copyright (c) 2013 Rob Zimmerman
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,71 +26,34 @@
 # See other generous contributors, plus view the source, readme, and license at https://github.com/taintedzodiac/relaymyhome
 # Tested in OS X 10.8 (Mountain Lion) and Mavericks
 
-### The time we will pause on each MAC address
-relay_time="90"
-sleep_time="10"
-
 wservice=`/usr/sbin/networksetup -listallnetworkservices | grep -Ei '(wi-fi|airport)'`
 wifi=$(networksetup -listallhardwareports | awk "/$wservice/,/Ethernet/"' getline { print $2 }')
 
-WirelessMAC=$(networksetup -getmacaddress "${wifi}" | awk '{print $3}')
+WirelessMAC=$(networksetup -getmacaddress $wifi | awk '{print $3}')
 echo "Original MAC address is: $WirelessMAC"
 
-function notify {
-    if [ -z ${speak} ] ; then
-        echo "${@}" ;
-    else
-        say --interactive=green "${@}" ;
-    fi
-    return 0
-}
-
-function cleanup {
-    sudo ifconfig ${wifi} lladdr ${WirelessMAC}
-    networksetup -setairportpower ${wifi} off
-    networksetup -setairportpower ${wifi} on
+cleanup()
+{
+    sudo ifconfig $wifi lladdr $WirelessMAC
+    networksetup -setairportpower $wifi off
+    networksetup -setairportpower $wifi on
 
     echo "Cycling of Relays has completed, MAC address reverted."
-    notify "Time to check your street passes!"
-    return 0
 }
 
-function ctrl_c {
-    # user quit midway through, so we should revert
-    # the MAC address by calling our cleanup function
-    echo "*** Interrupted ***"
-    cleanup
-    exit $?
-}
-
-function usage {
-    echo "$0 [-c count] [-s]" 
-    echo "c: the number of MAC addresses to cycle through."
-    echo "s: audibly speak when the script is done"
+ctrl_c()
+{
+  # user quit midway through, so we should revert
+  # the MAC address by calling our cleanup function
+  echo "*** Interrupted ***"
+  cleanup
+  exit $?
 }
 
 # trap keyboard interrupt (control-c) or unexpected quit
 trap ctrl_c SIGINT SIGTERM
 
-while getopts hsc: option
-do
-    case "${option}" in
-        h) usage ; exit ;;
-        s) speak=1 ;;
-        c) count=${OPTARG} ;;
-        *) usage ; exit 1 ;
-    esac
-done
-
-shift $((OPTIND - 1))
-
-### TODO:
-### * change this to a case statement
-### * Make most of this into functions
-### * Parse other cli options for verbosity and say vs silent
-### * Put the list of MACs into a sqlite3 db and query only oldest visited ones?
-
-if  [[ $1 == "full" || $1 == "fuller" || $1 == "quick" ]]
+if  [[ $1 == "full" || $1 == "quick" ]]
 then
     # Generate a full list of 160 MACs when "full" mode is specified
     # To use full mode: ./relaymyhome full
@@ -100,8 +62,20 @@ then
     # Set the base MAC address
     baseAddr="4E:53:50:4F:4F:"
 
-    # Create an array for the last octet of the mac address, limited range.
-    Addr=($(for X in {0..159} ; do echo ${X} | awk '{printf "%s%02X ", "4E:53:50:4F:4F:", $1}'; done ;))
+    # Legal characters for MAC (Limited range for first digit)
+    CharsA=("0" "1" "2" "3" "4" "5" "6" "7" "8" "9")
+    CharsB=("0" "1" "2" "3" "4" "5" "6" "7" "8" "9" "A" "B" "C" "D" "E" "F")
+
+    # Create the addresses programmatically
+    count=0
+    for i in "${CharsA[@]}"
+    do
+        for j in "${CharsB[@]}"
+        do
+            mac=$baseAddr$i$j
+            Addr+=($mac)
+        done
+    done
 
     if [[ $1 == "full" ]]
     then
@@ -109,19 +83,18 @@ then
       echo "Full Mode enabled. Randomly seeding five addresses from full list."
     else
       num=2
-      echo "Quick Mode enabled. Randomly seeding ${num} addresses from full list."
+      echo "Quick Mode enabled. Randomly seeding two addresses from full list."
     fi
 
-    for ((a=1; a<=$num; a++));
+    for a in $(seq 1 $num)
     do
         selectedAddr=${Addr[$RANDOM % ${#Addr[@]} ]}
         echo "Cycling WiFi..."
         sudo ifconfig $wifi lladdr $selectedAddr
         networksetup -setairportpower $wifi off
-        sleep ${sleep_time}
         networksetup -setairportpower $wifi on
-        echo "Spoofing $wifi to $selectedAddr for ${relay_time} seconds ($a of $num)"
-        sleep ${relay_time}
+        echo "Spoofing $wifi to $selectedAddr for 90 seconds ($a of $num)"
+        sleep 90
     done
 
 
@@ -159,14 +132,15 @@ else
         echo "Cycling WiFi..."
         sudo ifconfig $wifi lladdr $a
         networksetup -setairportpower $wifi off
-        sleep ${sleep_time}
         networksetup -setairportpower $wifi on
         echo "Spoofing $wifi to $a for 90 seconds ($n of 21)"
         n=$((n+1))
-        sleep ${relay_time}
+        sleep 90
     done
 fi
 
 # ... and we are done
 
 cleanup
+
+echo "Time to check your StreetPasses!"
